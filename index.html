@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AetherX — Route Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <span class="wordmark">AETHER<b>X</b></span>
+    <span class="sub">Route Desk / v0.3 prototype</span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-view="plan" class="on"><i>01</i>Plan</button>
+    <button role="tab" data-view="drive"><i>02</i>Drive</button>
+    <button role="tab" data-view="log"><i>03</i>Log</button>
+    <button role="tab" data-view="fleet"><i>04</i>Fleet</button>
+    <button role="tab" data-view="method"><i>05</i>Method</button>
+  </nav>
+  <button class="voice-btn" id="voiceBtn" title="Voice assistant (hold V)">
+    <span class="dot"></span><span class="lbl">Voice</span>
+  </button>
+</header>
+
+<div class="voice-strip" id="voiceStrip" hidden>
+  <span class="vs-tag">Listening</span>
+  <span id="voiceHeard">Say something like “route from Chennai Central to Mahabalipuram”</span>
+  <form id="voiceTyped" autocomplete="off"><input id="voiceText" placeholder="…or type a command"><button>Send</button></form>
+  <button class="x" id="voiceClose" aria-label="Close">×</button>
+</div>
+
+<main>
+
+<!-- 01 PLAN -->
+<section class="view on" id="view-plan">
+  <aside class="planner">
+    <form id="routeForm" autocomplete="off">
+      <div class="field">
+        <label for="from">From</label>
+        <div class="row">
+          <input id="from" value="Tambaram">
+          <button type="button" class="ghost sm" id="useLoc" title="Use my location">◎</button>
+        </div>
+      </div>
+      <button type="button" class="swap" id="swap" title="Swap">⇅</button>
+      <div class="field">
+        <label for="to">To</label>
+        <input id="to" value="Kanchipuram">
+      </div>
+
+      <div class="field">
+        <label for="vehicle">Vehicle</label>
+        <select id="vehicle">
+          <option value="petrol">Petrol hatchback</option>
+          <option value="diesel">Diesel SUV</option>
+          <option value="cng">CNG sedan</option>
+          <option value="ev">Electric (EV)</option>
+          <option value="lcv">Light delivery van (diesel)</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="period">Leaving</label>
+        <select id="period">
+          <option value="peak">Peak hour (8–11, 17–21)</option>
+          <option value="day">Daytime</option>
+          <option value="night">Night / empty roads</option>
+        </select>
+      </div>
+
+      <div class="ev-only" id="evFields" hidden>
+        <div class="split">
+          <div class="field"><label for="battery">Charge now</label><div class="unit"><input id="battery" type="number" min="5" max="100" value="38"><span>%</span></div></div>
+          <div class="field"><label for="capacity">Pack</label><div class="unit"><input id="capacity" type="number" min="10" max="120" value="30"><span>kWh</span></div></div>
+        </div>
+      </div>
+
+      <button class="primary" type="submit" id="goBtn">Compare routes</button>
+      <p class="hint">Routes from OpenStreetMap via OSRM. Emissions are <u>estimates</u> — see Method.</p>
+    </form>
+
+    <div id="routeList" class="routes"></div>
+    <div id="chargePanel" class="charge" hidden></div>
+  </aside>
+
+  <div class="mapwrap">
+    <div id="map"></div>
+    <div class="map-legend">
+      <span><i class="k eco"></i>Lowest CO₂</span>
+      <span><i class="k fast"></i>Fastest</span>
+      <span><i class="k other"></i>Other</span>
+      <span><i class="k chg"></i>Charger</span>
+    </div>
+    <div class="map-status" id="mapStatus" hidden></div>
+  </div>
+</section>
+
+<!-- 02 DRIVE -->
+<section class="view" id="view-drive">
+  <div class="cluster" id="cluster">
+    <div class="empty" id="driveEmpty">
+      <p class="big">No route loaded.</p>
+      <p>Plan a trip first, pick a route, then press <b>Drive</b>.</p>
+      <button class="primary" data-goto="plan">Go to Plan</button>
+    </div>
+
+    <div class="drive" id="driveUI" hidden>
+      <div class="next">
+        <div class="arrow" id="dArrow">↑</div>
+        <div>
+          <div class="in" id="dIn">—</div>
+          <div class="instr" id="dInstr">—</div>
+        </div>
+      </div>
+
+      <div class="gauges">
+        <div class="g"><span>Speed</span><b id="gSpeed">0</b><em>km/h</em></div>
+        <div class="g"><span>CO₂ so far</span><b id="gCO2">0.00</b><em>kg</em></div>
+        <div class="g"><span id="gFuelLbl">Fuel used</span><b id="gFuel">0.00</b><em id="gFuelUnit">L</em></div>
+        <div class="g"><span>Remaining</span><b id="gRem">0.0</b><em>km</em></div>
+        <div class="g ev-g" id="gBattWrap" hidden><span>Battery</span><b id="gBatt">0</b><em>%</em></div>
+      </div>
+
+      <div class="progress"><div id="dProg"></div></div>
+      <div class="eco-coach" id="coach">Steady speeds between 50 and 70 km/h burn the least fuel.</div>
+
+      <div class="drive-ctl">
+        <button class="ghost" id="dPause">Pause</button>
+        <label class="sim">Sim speed
+          <select id="dSim"><option value="20">20×</option><option value="60" selected>60×</option><option value="180">180×</option></select>
+        </label>
+        <label class="sim"><input type="checkbox" id="dSpeak" checked> Spoken guidance</label>
+        <button class="primary" id="dEnd">End &amp; log trip</button>
+      </div>
+      <div class="minimap" id="miniMap"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 03 LOG -->
+<section class="view" id="view-log">
+  <div class="page">
+    <div class="page-h">
+      <h2>Trip log</h2>
+      <div class="acts">
+        <button class="ghost sm" id="seedTrips">Load sample month</button>
+        <button class="ghost sm" id="exportTrips">Export CSV</button>
+        <button class="ghost sm danger" id="clearTrips">Clear my data</button>
+      </div>
+    </div>
+    <div class="stats" id="logStats"></div>
+    <div class="twocol">
+      <div class="card">
+        <h3>CO₂ per week <small>kg, estimated</small></h3>
+        <div id="weekChart" class="chart"></div>
+      </div>
+      <div class="card">
+        <h3>What the choices added up to</h3>
+        <div id="savedBox"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Trips <small>stored only in this browser</small></h3>
+      <table class="tbl" id="tripTable"></table>
+    </div>
+  </div>
+</section>
+
+<!-- 04 FLEET -->
+<section class="view" id="view-fleet">
+  <div class="page">
+    <div class="page-h">
+      <h2>Fleet — Coastal Logistics (demo)</h2>
+      <div class="acts">
+        <select id="fleetRange"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option></select>
+      </div>
+    </div>
+    <div class="stats" id="fleetStats"></div>
+    <div class="card">
+      <h3>Vehicles <small>click a column to sort</small></h3>
+      <table class="tbl sortable" id="fleetTable"></table>
+    </div>
+    <div class="twocol">
+      <div class="card">
+        <h3>Efficiency vs. distance</h3>
+        <div id="fleetScatter" class="chart"></div>
+      </div>
+      <div class="card">
+        <h3>Flags this period</h3>
+        <ul class="flags" id="fleetFlags"></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 05 METHOD -->
+<section class="view" id="view-method">
+  <div class="page narrow">
+    <h2>How the numbers are made</h2>
+    <p class="lede">Every CO₂ and fuel figure in AetherX is an estimate. Here is the arithmetic, so you can check it.</p>
+
+    <h3>1 · Per-segment emissions</h3>
+    <p>Each route from OSRM comes split into steps, each with a length and an expected duration. From those we get the average speed of every step and apply:</p>
+    <pre class="formula">CO₂(step) = distance_km × base_factor × speed_curve(v) × stop_penalty</pre>
+    <table class="tbl" id="factorTable"></table>
+    <p><b>speed_curve</b> is U-shaped with its minimum around 60 km/h: crawling traffic and high motorway speeds both cost more per km. <b>stop_penalty</b> adds 4–18% on short urban steps where stop-start driving is likely.</p>
+    <div class="card"><h3>Speed curve used</h3><div id="curveChart" class="chart"></div></div>
+
+    <h3>2 · Traffic</h3>
+    <p>OSRM's times assume empty roads. We stretch each step by how congested roads of that kind typically get at the hour you pick. This is a modelled pattern, not live traffic.</p>
+    <table class="tbl"><tr><th>Free-flow speed of road</th><th class="n">Peak</th><th class="n">Daytime</th><th class="n">Night</th></tr>
+      <tr><td>Under 25 km/h (side streets)</td><td class="n">×1.35</td><td class="n">×1.15</td><td class="n">×1.00</td></tr>
+      <tr><td>25–45 km/h (city arterials)</td><td class="n">×1.95</td><td class="n">×1.35</td><td class="n">×1.00</td></tr>
+      <tr><td>45–70 km/h (main roads)</td><td class="n">×1.60</td><td class="n">×1.25</td><td class="n">×1.00</td></tr>
+      <tr><td>Over 70 km/h (highways)</td><td class="n">×1.15</td><td class="n">×1.05</td><td class="n">×1.00</td></tr></table>
+
+    <h3>3 · Picking the eco route</h3>
+    <p>We ask OSRM for alternatives and rank them by estimated CO₂. The fastest route is <b>always shown</b> next to it with the time difference. The eco route is a suggestion; you choose.</p>
+
+    <h3>4 · Charging stops (EV)</h3>
+    <p>Energy = CO₂ model ÷ grid factor. If the trip would drop the battery under 15%, we find the point where charge reaches about 20% and look up charging stations within 6 km of it from OpenStreetMap (Overpass API).</p>
+
+    <h3>5 · What we do with your data</h3>
+    <ul class="plain">
+      <li><b>Location:</b> only read if you press ◎, and the browser asks you first. It is not stored.</li>
+      <li><b>Trips:</b> kept in this browser's local storage. Nothing is uploaded. “Clear my data” deletes it.</li>
+      <li><b>Voice:</b> speech recognition is done by your browser. We only see the text of the command.</li>
+      <li><b>Third parties:</b> place names go to Nominatim (geocoding), coordinates to OSRM (routing) and Overpass (chargers), under their usage policies.</li>
+    </ul>
+    <p class="muted small">Factors are rounded from published averages (India petrol ≈ 2.31 kg CO₂/L, diesel ≈ 2.68 kg CO₂/L, grid ≈ 0.71 kg CO₂/kWh). Real figures vary with load, AC use, tyres and driving style.</p>
+  </div>
+</section>
+
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
